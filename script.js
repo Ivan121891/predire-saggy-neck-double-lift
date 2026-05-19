@@ -2,7 +2,7 @@
   "use strict";
 
   // ------- Configuration -------
-  const SERVICE_NAME = "Saggy Neck Double Lift";
+  const SERVICE_NAME = "Saggy Neck Double Lift Skin Tightening Treatment";
   const SERVICE_DURATION_MIN = 60;
 
   // GHL credentials
@@ -281,8 +281,8 @@
         lastName: lastName || '-',
         email,
         phone,
-        source: 'Saggy Neck Double Lift LP',
-        tags: ['Saggy Neck Double Lift'],
+        source: 'Saggy Neck Double Lift Skin Tightening Treatment LP',
+        tags: ['Saggy Neck Double Lift Skin Tightening Treatment'],
       });
       const contactId = contactRes.contact?.id || contactRes.id;
 
@@ -297,7 +297,7 @@
         assignedUserId: GHL.userId,
         startTime:      isoInTz(start, BUSINESS_TZ),
         endTime:        isoInTz(end,   BUSINESS_TZ),
-        title:          `${name} — Saggy Neck Double Lift`,
+        title:          `${name} — Saggy Neck Double Lift Skin Tightening Treatment`,
         // appointmentStatus: 'confirmed',
         selectedTimezone: BUSINESS_TZ,
       });

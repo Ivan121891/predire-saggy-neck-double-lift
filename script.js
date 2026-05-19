@@ -2,15 +2,15 @@
   "use strict";
 
   // ------- Configuration -------
-  const SERVICE_NAME = "Diamond Glass Glow";
+  const SERVICE_NAME = "Saggy Neck Double Lift";
   const SERVICE_DURATION_MIN = 60;
 
   // GHL credentials
   const GHL = {
     locationId: 'y0BxIuctoWoj4zjXtJbh',
-    calendarId: 'XC5ngq4Ax0KsaofGDw9N',
+    calendarId: 'OrTYjwn8ul9aGXxxEqei',
     userId:     '2tQreqXcDpaAiSBqlK7T',
-    apiKey:     'pit-da9b40a9-7512-4a9f-ac91-e150a241cf69',
+    apiKey:     'pit-7fe5e574-7277-43b9-aef0-c14dd061745d',
     apiBase:    'https://services.leadconnectorhq.com',
     version:    '2021-07-28',
   };
@@ -281,8 +281,8 @@
         lastName: lastName || '-',
         email,
         phone,
-        source: 'Diamond Glass Glow LP',
-        tags: ['Diamond Glass Glow'],
+        source: 'Saggy Neck Double Lift LP',
+        tags: ['Saggy Neck Double Lift'],
       });
       const contactId = contactRes.contact?.id || contactRes.id;
 
@@ -297,8 +297,8 @@
         assignedUserId: GHL.userId,
         startTime:      isoInTz(start, BUSINESS_TZ),
         endTime:        isoInTz(end,   BUSINESS_TZ),
-        title:          `${name} — Diamond Glass Glow`,
-        appointmentStatus: 'confirmed',
+        title:          `${name} — Saggy Neck Double Lift`,
+        // appointmentStatus: 'confirmed',
         selectedTimezone: BUSINESS_TZ,
       });
 

@@ -1,9 +1,17 @@
 (function () {
   "use strict";
 
+  const TEST = new URLSearchParams(location.search).get('test') === '1';
+
   // ------- Configuration -------
   const SERVICE_NAME = "Saggy Neck Double Lift Skin Tightening Treatment";
   const SERVICE_DURATION_MIN = 60;
+
+  // Days of week to block from booking (0=Sun, 6=Sat)
+  const BLOCKED_DOW = [6]; // Block Saturdays
+
+  // Per-day hour caps: maps DOW → last hour (inclusive). Overrides buildAllSlots.
+  const DAY_HOUR_CAPS = { 5: 15 }; // Friday: 9AM-3PM
 
   // GHL credentials
   const GHL = {
@@ -101,7 +109,7 @@
       a.getDate() === b.getDate();
   }
   function formatLongDate(d) {
-    return d.toLocaleDateString(undefined, {
+    return d.toLocaleDateString('en-US', {
       weekday: "long", month: "long", day: "numeric", year: "numeric",
     });
   }
@@ -127,9 +135,11 @@
     }
 
     cells.forEach((d) => {
+      const blocked = BLOCKED_DOW.includes(d.getDay());
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "date-cell";
+      btn.className = "date-cell" + (blocked ? " disabled" : "");
+      if (blocked) btn.disabled = true;
       if (sameDay(d, selectedDate)) btn.classList.add("selected");
 
       const dow = document.createElement("span");
@@ -143,7 +153,7 @@
       btn.appendChild(dow);
       btn.appendChild(day);
 
-      btn.addEventListener("click", () => selectDate(d));
+      if (!blocked) btn.addEventListener("click", () => selectDate(d));
       dateGrid.appendChild(btn);
     });
   }
@@ -151,6 +161,10 @@
   function renderTimes() {
     const now = new Date();
     const isToday = selectedDate && sameDay(selectedDate, today);
+
+    // Apply per-day hour cap if set (e.g., Friday until 3PM)
+    const dow = selectedDate ? selectedDate.getDay() : -1;
+    const hourCap = DAY_HOUR_CAPS[dow] || 17;
 
     function filterPast(slots) {
       if (!isToday) return slots;
@@ -163,8 +177,8 @@
       });
     }
 
-    // Morning block (9 AM - 11 AM)
-    const morning = ALL_SLOTS.filter(s => s.hour >= 9 && s.hour <= 11);
+    // Morning block (9 AM - 11 AM) — capped by hourCap
+    const morning = ALL_SLOTS.filter(s => s.hour >= 9 && s.hour <= 11 && s.hour <= hourCap);
     const morningAvail = filterPast(morning);
     morningGrid.innerHTML = "";
     if (morningAvail.length > 0) {
@@ -180,8 +194,8 @@
       morningGrid.innerHTML = '<p style="font-size:.8rem;color:var(--muted-foreground);text-align:center;grid-column:1/-1;padding:6px 0;">No available morning slots</p>';
     }
 
-    // Afternoon block (12 PM - 5 PM)
-    const afternoon = ALL_SLOTS.filter(s => s.hour >= 12 && s.hour <= 17);
+    // Afternoon block (12 PM - hourCap)
+    const afternoon = ALL_SLOTS.filter(s => s.hour >= 12 && s.hour <= hourCap);
     const afternoonAvail = filterPast(afternoon);
     afternoonGrid.innerHTML = "";
     if (afternoonAvail.length > 0) {
@@ -275,14 +289,37 @@
 
     try {
       // 1) Upsert contact in GHL
+      // Persist the lead + chosen slot BEFORE any GHL call (non-blocking).
+      var leadId = null;
+      try {
+        const _leadRes = await fetch('/api/lead', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+          body: JSON.stringify({
+            locationId: GHL.locationId,
+            client: location.hostname.split('.')[0].split('-')[0],
+            page: location.hostname,
+            treatment: SERVICE_NAME,
+            calendarId: GHL.calendarId,
+            startTime: isoInTz(start, BUSINESS_TZ),
+            endTime: isoInTz(end, BUSINESS_TZ),
+            name, email, phone,
+            fbclid: (new URLSearchParams(location.search)).get('fbclid') || undefined,
+            fbp: (document.cookie.match(/_fbp=([^;]+)/) || [])[1],
+            fbc: (document.cookie.match(/_fbc=([^;]+)/) || [])[1],
+            test: TEST,
+          }),
+        });
+        const _leadJson = await _leadRes.json().catch(function () { return {}; });
+        leadId = _leadJson.leadId || null;
+      } catch (_) { /* never block booking on lead persistence */ }
       const contactRes = await ghlFetch('/contacts/upsert', {
         locationId: GHL.locationId,
-        firstName: firstName || name,
+        firstName: (TEST ? "[TEST] " : "") + (firstName || name),
         lastName: lastName || '-',
         email,
         phone,
         source: 'Saggy Neck Double Lift Skin Tightening Treatment LP',
-        tags: ['Saggy Neck Double Lift Skin Tightening Treatment'],
+        tags: TEST ? ['Saggy Neck Double Lift Skin Tightening Treatment', 'TEST-DONOTCOUNT'] : ['Saggy Neck Double Lift Skin Tightening Treatment'],
       });
       const contactId = contactRes.contact?.id || contactRes.id;
 
@@ -290,8 +327,9 @@
       // appointmentStatus: 'confirmed' ensures the booking is visible in
       // the GHL dashboard calendar view (default 'new' may be hidden).
       // selectedTimezone tells GHL which timezone the slot was picked in.
-      await ghlFetch('/calendars/events/appointments', {
+      const _aptRes = await ghlFetch('/calendars/events/appointments', {
         calendarId: GHL.calendarId,
+        ignoreFreeSlotValidation: true,
         locationId: GHL.locationId,
         contactId,
         assignedUserId: GHL.userId,
@@ -302,8 +340,20 @@
         selectedTimezone: BUSINESS_TZ,
       });
 
+      const appointmentId = (_aptRes && (_aptRes.id || _aptRes.appointmentId || (_aptRes.appointment && _aptRes.appointment.id))) || null;
+      // Record the TRUE outcome: ghlFetch throws on non-2xx (-> outer catch ->
+      // 'fail'), so reaching here means 2xx; a missing id is a captured lead,
+      // not a booking — record 'lead_only' so the store never over-counts success.
+      const bookingStatus = appointmentId ? 'success' : 'lead_only';
+      try {
+        fetch('/api/lead/result', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+          body: JSON.stringify({ leadId: leadId, locationId: GHL.locationId, status: bookingStatus, appointmentId: appointmentId, eventId: (typeof eventId !== 'undefined' ? eventId : null), scheduleFired: (!TEST && bookingStatus === 'success'), test: TEST }),
+        }).catch(function () {});
+      } catch (_) {}
+
       track("Lead", { content_name: SERVICE_NAME });
-      track("Schedule", { content_name: SERVICE_NAME });
+      if (!TEST && bookingStatus === 'success') track("Schedule", { content_name: SERVICE_NAME });
 
       renderConfirmation({
         service: SERVICE_NAME,
@@ -313,6 +363,12 @@
       showStep("confirmed");
     } catch (err) {
       console.error("GHL booking error", err);
+      try {
+        fetch('/api/lead/result', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+          body: JSON.stringify({ leadId: leadId, locationId: GHL.locationId, status: 'fail', error: (err && err.message) ? err.message : String(err), test: TEST }),
+        }).catch(function () {});
+      } catch (_) {}
       const detail = (err && err.message) ? err.message : "Booking failed. Please try again or call us.";
       errorText.textContent = detail;
       errorText.classList.remove("hidden");
